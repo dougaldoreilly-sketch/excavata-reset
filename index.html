@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Reset your Excavata password</title>
+  <style>
+    :root { --orange: #E86B30; --bg: #1a1a1a; --card: #242424; --text: #f0f0f0; --muted: #9a9a9a; --err: #ff6b6b; --ok: #4caf82; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+           background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; }
+    .card { background: var(--card); border-radius: 12px; padding: 32px; width: 100%; max-width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
+    input[type=password] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #1c1c1c; color: var(--text); font-size: 15px; }
+    input:focus { outline: none; border-color: var(--orange); }
+    button { width: 100%; margin-top: 24px; padding: 13px; border: none; border-radius: 8px; background: var(--orange); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .msg { margin-top: 16px; font-size: 14px; min-height: 20px; }
+    .msg.err { color: var(--err); }
+    .msg.ok { color: var(--ok); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Reset your password</h1>
+    <p class="sub">Choose a new password for your Excavata account.</p>
+
+    <div id="form-wrap" class="hidden">
+      <label for="pw">New password</label>
+      <input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+      <label for="pw2">Confirm new password</label>
+      <input id="pw2" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+      <button id="submit" disabled>Update password</button>
+    </div>
+
+    <div id="status" class="msg">Verifying your reset link…</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // Item 136 — completes the Supabase password-recovery flow off-site (the
+    // marketing domain is offline). URL + anon key are the app's PUBLIC values.
+    const SUPABASE_URL = 'https://erdvfhntklgkkgfqgcpv.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_9fg_ZRJ8gA-7xH1e8dupkQ_vMN_LPpk';
+
+    const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const statusEl = document.getElementById('status');
+    const formWrap = document.getElementById('form-wrap');
+    const submitBtn = document.getElementById('submit');
+    const pw = document.getElementById('pw');
+    const pw2 = document.getElementById('pw2');
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text;
+      statusEl.className = 'msg' + (kind ? ' ' + kind : '');
+    }
+
+    let recoveryReady = false;
+    function enableForm() {
+      if (recoveryReady) return;
+      recoveryReady = true;
+      formWrap.classList.remove('hidden');
+      setStatus('', '');
+    }
+
+    // The recovery link carries the token in the URL fragment; supabase-js
+    // detects it and fires PASSWORD_RECOVERY once the session is established.
+    client.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') enableForm();
+    });
+
+    // Fallback: if the SDK already parsed a session before the listener bound,
+    // or the fragment is missing/expired, resolve after a short grace period.
+    window.addEventListener('load', async () => {
+      const hasRecoveryHash = window.location.hash.includes('type=recovery') ||
+        window.location.hash.includes('access_token');
+      if (!hasRecoveryHash) {
+        setStatus('This reset link is missing its token. Request a new password-reset email from the app.', 'err');
+        return;
+      }
+      setTimeout(async () => {
+        if (recoveryReady) return;
+        const { data } = await client.auth.getSession();
+        if (data && data.session) enableForm();
+        else setStatus('This reset link has expired or already been used. Request a new one from the app.', 'err');
+      }, 1200);
+    });
+
+    function validate() {
+      const a = pw.value, b = pw2.value;
+      submitBtn.disabled = !(a.length >= 8 && a === b);
+    }
+    pw.addEventListener('input', validate);
+    pw2.addEventListener('input', validate);
+
+    submitBtn.addEventListener('click', async () => {
+      if (pw.value.length < 8) { setStatus('Password must be at least 8 characters.', 'err'); return; }
+      if (pw.value !== pw2.value) { setStatus('Passwords do not match.', 'err'); return; }
+      submitBtn.disabled = true;
