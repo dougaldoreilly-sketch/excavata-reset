@@ -42,8 +42,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    // Item 136 — completes the Supabase password-recovery flow off-site (the
-    // marketing domain is offline). URL + anon key are the app's PUBLIC values.
     const SUPABASE_URL = 'https://erdvfhntklgkkgfqgcpv.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_9fg_ZRJ8gA-7xH1e8dupkQ_vMN_LPpk';
 
@@ -60,35 +58,43 @@
     }
 
     let recoveryReady = false;
+    let resolveTimer = null;
     function enableForm() {
       if (recoveryReady) return;
       recoveryReady = true;
+      if (resolveTimer) clearTimeout(resolveTimer);
       formWrap.classList.remove('hidden');
       setStatus('', '');
     }
 
-    // The recovery link carries the token in the URL fragment; supabase-js
-    // detects it and fires PASSWORD_RECOVERY once the session is established.
     client.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') enableForm();
     });
 
-    // Fallback: if the SDK already parsed a session before the listener bound,
-    // or the fragment is missing/expired, resolve after a short grace period.
-    window.addEventListener('load', async () => {
-      const hasRecoveryHash = window.location.hash.includes('type=recovery') ||
-        window.location.hash.includes('access_token');
-      if (!hasRecoveryHash) {
-        setStatus('This reset link is missing its token. Request a new password-reset email from the app.', 'err');
+    async function verifyRecovery() {
+      const params = new URLSearchParams(window.location.search);
+      const tokenHash = params.get('token_hash');
+      const type = params.get('type') || 'recovery';
+
+      if (tokenHash) {
+        const { error } = await client.auth.verifyOtp({ token_hash: tokenHash, type });
+        if (!error) { enableForm(); return; }
+        setStatus('This reset link has expired or has already been used. Request a new one from the app.', 'err');
         return;
       }
-      setTimeout(async () => {
+
+      resolveTimer = setTimeout(async () => {
         if (recoveryReady) return;
         const { data } = await client.auth.getSession();
-        if (data && data.session) enableForm();
-        else setStatus('This reset link has expired or already been used. Request a new one from the app.', 'err');
-      }, 1200);
-    });
+        if (data && data.session) { enableForm(); return; }
+        if (params.has('code')) {
+          setStatus('This reset link can’t be completed in the browser. Request a new password-reset email from the app.', 'err');
+        } else {
+          setStatus('This reset link is missing its token. Request a new password-reset email from the app.', 'err');
+        }
+      }, 4000);
+    }
+    window.addEventListener('load', verifyRecovery);
 
     function validate() {
       const a = pw.value, b = pw2.value;
@@ -101,3 +107,16 @@
       if (pw.value.length < 8) { setStatus('Password must be at least 8 characters.', 'err'); return; }
       if (pw.value !== pw2.value) { setStatus('Passwords do not match.', 'err'); return; }
       submitBtn.disabled = true;
+      setStatus('Updating…', '');
+      const { error } = await client.auth.updateUser({ password: pw.value });
+      if (error) {
+        setStatus(error.message || 'Could not update password. The link may have expired — request a new one.', 'err');
+        submitBtn.disabled = false;
+        return;
+      }
+      formWrap.classList.add('hidden');
+      setStatus('Password updated. You can now return to the Excavata app and sign in with your new password.', 'ok');
+    });
+  </script>
+</body>
+</html>
