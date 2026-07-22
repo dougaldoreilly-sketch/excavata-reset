@@ -1,0 +1,48 @@
+name: Keep Supabase warm
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  keep-warm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ping Supabase to reset the idle timer
+        run: |
+          set -uo pipefail
+          URL="https://erdvfhntklgkkgfqgcpv.supabase.co"
+          KEY="sb_publishable_9fg_ZRJ8gA-7xH1e8dupkQ_vMN_LPpk"
+
+          rest=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+                   -H "apikey: $KEY" "$URL/rest/v1/" || echo 000)
+          auth=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+                   -H "apikey: $KEY" "$URL/auth/v1/health" || echo 000)
+          echo "REST=$rest  AUTH=$auth"
+
+          if [ "$rest" = "000" ] || [ "$rest" -ge 500 ] 2>/dev/null; then
+            echo "::error::Supabase REST unreachable (HTTP $rest) — the project may be paused."
+            exit 1
+          fi
+          echo "Supabase is awake."
+
+      - name: Weekly heartbeat commit
+        if: ${{ github.event_name == 'schedule' }}
+        run: |
+          set -euo pipefail
+          if [ "$(date -u +%u)" != "1" ]; then
+            echo "Not Monday — skipping heartbeat commit."
+            exit 0
+          fi
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > keepalive.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add keepalive.txt
+          git diff --staged --quiet || git commit -m "chore: weekly keepalive heartbeat [skip ci]"
+          git push
